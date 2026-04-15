@@ -23,8 +23,6 @@ const DEFAULTS = {
     pruneAfterDays: 7,
   },
   channels: {
-    'openclaw-weixin': { prepend: '', maxSegmentLength: 120, splitLong: true },
-    discord: { prepend: '', markdown: true },
     default: { prepend: '' },
   },
   trace: {

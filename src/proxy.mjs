@@ -45,8 +45,27 @@ export function createProxy({ port, upstream, config }) {
             },
           },
           (proxyRes) => {
-            res.writeHead(proxyRes.statusCode, proxyRes.headers);
-            proxyRes.pipe(res);
+            // Collect response for response handlers, then pipe to client
+            if (processed.context) {
+              const resChunks = [];
+              proxyRes.on('data', (c) => resChunks.push(c));
+              proxyRes.on('end', () => {
+                const resBody = Buffer.concat(resChunks);
+                res.writeHead(proxyRes.statusCode, proxyRes.headers);
+                res.end(resBody);
+                // Fire response handlers async (don't block client)
+                let resJson;
+                try { resJson = JSON.parse(resBody.toString()); } catch {}
+                pipeline.handleResponse({
+                  response: { status: proxyRes.statusCode, body: resJson },
+                  context: processed.context,
+                  config,
+                }).catch(() => {});
+              });
+            } else {
+              res.writeHead(proxyRes.statusCode, proxyRes.headers);
+              proxyRes.pipe(res);
+            }
           }
         );
 

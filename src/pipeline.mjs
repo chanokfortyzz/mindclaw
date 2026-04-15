@@ -6,9 +6,14 @@
  */
 
 const middlewares = [];
+const responseHandlers = [];
 
 function use(name, fn) {
   middlewares.push({ name, fn });
+}
+
+function onResponse(name, fn) {
+  responseHandlers.push({ name, fn });
 }
 
 async function process({ method, url, headers, body, config }) {
@@ -55,18 +60,26 @@ async function process({ method, url, headers, body, config }) {
   return { body: JSON.stringify(parsed), context };
 }
 
-function detectChannel(body, headers) {
-  // Check global hint (set by mindclaw harness plugin inside Gateway)
-  for (const key of ['__mindclaw_channel_hint', '__openclaw_channel_hint']) {
-    const hint = globalThis[key];
-    const ts = globalThis[key + '_ts'] || 0;
-    if (typeof hint === 'string' && hint && (Date.now() - ts) < 30000) {
-      globalThis[key] = '';
-      return hint.trim().toLowerCase();
+async function handleResponse({ response, context, config }) {
+  for (const handler of responseHandlers) {
+    try {
+      await handler.fn({ response, context, config });
+    } catch (err) {
+      console.error(`[mindclaw] response handler "${handler.name}" error:`, err.message);
     }
   }
+}
 
-  // Check metadata
+function detectChannel(body, headers) {
+  // Check global hint (set by mindclaw harness plugin inside Gateway)
+  const hint = globalThis.__mindclaw_channel_hint;
+  const ts = globalThis.__mindclaw_channel_hint_ts || 0;
+  if (typeof hint === 'string' && hint && (Date.now() - ts) < 30000) {
+    globalThis.__mindclaw_channel_hint = '';
+    return hint.trim().toLowerCase();
+  }
+
+  // Check metadata fields
   const candidates = [
     body.channel,
     body.metadata?.channel,
@@ -76,13 +89,7 @@ function detectChannel(body, headers) {
 
   if (candidates.length > 0) return String(candidates[0]).toLowerCase();
 
-  // Probe body text
-  const probe = JSON.stringify(body.metadata || {});
-  if (/weixin|wechat/i.test(probe)) return 'openclaw-weixin';
-  if (/discord/i.test(probe)) return 'discord';
-  if (/yuanbao/i.test(probe)) return 'yuanbao';
-
   return 'default';
 }
 
-export const pipeline = { use, process };
+export const pipeline = { use, onResponse, process, handleResponse };

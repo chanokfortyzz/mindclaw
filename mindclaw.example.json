@@ -1,0 +1,34 @@
+{
+  "modules": {
+    "promptAssembler": true,
+    "skillRouter": true,
+    "memoryLoop": true,
+    "contextCompressor": true,
+    "taskAnalyzer": true,
+    "riskGate": true,
+    "traceLogger": true
+  },
+  "skills": {
+    "scanDirs": ["./skills"],
+    "builtIn": {
+      "weather": ["weather", "forecast", "temperature"],
+      "browser": ["browse", "screenshot", "webpage"]
+    }
+  },
+  "memory": {
+    "factsPath": "./state/facts.json",
+    "lessonsPath": "./state/lessons.json",
+    "maxFacts": 200,
+    "maxLessons": 200,
+    "pruneAfterDays": 7
+  },
+  "channels": {
+    "default": {
+      "prepend": ""
+    }
+  },
+  "trace": {
+    "enabled": true,
+    "logPath": "./logs/mindclaw-trace.jsonl"
+  }
+}

@@ -51,10 +51,7 @@ function extractChannel(event: any, ctx: any): string {
   if (ctxChannel) return String(ctxChannel).trim().toLowerCase();
 
   if (event?.provider) {
-    const p = String(event.provider).toLowerCase();
-    if (p.includes('yuanbao')) return 'yuanbao';
-    if (p.includes('weixin') || p.includes('wechat')) return 'openclaw-weixin';
-    if (p.includes('discord')) return 'discord';
+    return String(event.provider).trim().toLowerCase();
   }
 
   return 'default';
@@ -67,9 +64,6 @@ function extractChannel(event: any, ctx: any): string {
 function setChannelHint(channel: string) {
   (globalThis as any).__mindclaw_channel_hint = channel;
   (globalThis as any).__mindclaw_channel_hint_ts = Date.now();
-  // Legacy compat
-  (globalThis as any).__openclaw_channel_hint = channel;
-  (globalThis as any).__openclaw_channel_hint_ts = Date.now();
 }
 
 log('MODULE LOADED');
