@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 /**
  * Mindclaw Pipeline — middleware chain for LLM request processing
  *
@@ -14,6 +16,12 @@ function use(name, fn) {
 
 function onResponse(name, fn) {
   responseHandlers.push({ name, fn });
+}
+
+function messageHash(body) {
+  const userMsg = body.messages?.findLast?.(m => m.role === 'user');
+  const text = typeof userMsg?.content === 'string' ? userMsg.content : '';
+  return createHash('sha256').update(text).digest('hex').slice(0, 16);
 }
 
 async function process({ method, url, headers, body, config }) {
@@ -39,6 +47,7 @@ async function process({ method, url, headers, body, config }) {
     model: parsed.model || 'unknown',
     channel: detectChannel(parsed, headers),
     timestamp: Date.now(),
+    messageHash: messageHash(parsed),
     middlewareResults: {},
   };
 
@@ -55,6 +64,11 @@ async function process({ method, url, headers, body, config }) {
     } catch (err) {
       console.error(`[mindclaw] middleware "${mw.name}" error:`, err.message);
     }
+  }
+
+  // Build cache key from scope (set by scope-resolver middleware)
+  if (context.scope) {
+    context.cacheKey = `${context.scope.routeTag}:${context.scope.chatType}:${context.messageHash}`;
   }
 
   return { body: JSON.stringify(parsed), context };

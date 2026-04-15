@@ -9,7 +9,10 @@
   "main": "./src/index.mjs",
   "scripts": {
     "start": "node bin/mindclaw.mjs",
-    "dev": "node --watch bin/mindclaw.mjs"
+    "dev": "node --watch bin/mindclaw.mjs",
+    "test": "node --test test/test-all.mjs",
+    "migrate": "node bin/migrate-memory.mjs",
+    "migrate:dry": "node bin/migrate-memory.mjs --dry-run"
   },
   "keywords": ["openclaw", "llm", "proxy", "middleware", "ai-agent"],
   "license": "MIT",

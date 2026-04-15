@@ -8,6 +8,7 @@
  */
 
 import './provider-compat.mjs';
+import './scope-resolver.mjs';
 import './prompt-assembler.mjs';
 import './memory-loop.mjs';
 import './skill-router.mjs';

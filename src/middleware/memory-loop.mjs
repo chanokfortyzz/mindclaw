@@ -2,13 +2,17 @@
  * Memory Loop Middleware
  *
  * Reads facts and execution lessons from JSON files,
- * injects relevant ones into the system prompt,
- * and records new events after responses.
+ * ranks them by scope relevance + keyword overlap + freshness,
+ * injects the top-k into the system prompt,
+ * and records new events with canonical scope after responses.
  */
 
 import fs from 'node:fs';
 import path from 'node:path';
 import { pipeline } from '../pipeline.mjs';
+import { normalizeScope, scopeScore } from './scope-resolver.mjs';
+
+// --- JSON helpers ---
 
 function readJson(filePath, fallback = []) {
   try {
@@ -27,21 +31,57 @@ function writeJson(filePath, data) {
     const tmp = filePath + '.tmp';
     fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
     fs.renameSync(tmp, filePath);
-  } catch {}
+  } catch (err) {
+    console.error('[mindclaw] memory write error:', err.message);
+  }
 }
 
-function selectRelevant(items, message, limit = 5) {
+// --- Ranking engine ---
+
+const MAX_FACTS = 6;
+const MAX_LESSONS = 4;
+const FRESHNESS_HALF_LIFE_MS = 3 * 24 * 60 * 60 * 1000; // 3 days
+
+/**
+ * Score a single memory item against current scope + user message.
+ * Returns a number; higher = more relevant.
+ */
+function scoreItem(item, targetScope, messageWords) {
+  let score = 0;
+
+  // 1. Scope relevance (0-100, weight 0.5)
+  const itemScope = normalizeScope(item.scope || item.event || item);
+  score += scopeScore(itemScope, targetScope) * 0.5;
+
+  // 2. Keyword overlap (weight 0.3)
+  const text = JSON.stringify(item.event || item).toLowerCase();
+  const hits = messageWords.filter(w => text.includes(w)).length;
+  const keywordScore = messageWords.length > 0
+    ? (hits / messageWords.length) * 100
+    : 0;
+  score += keywordScore * 0.3;
+
+  // 3. Freshness (weight 0.2)
+  const ts = item.ts ? new Date(item.ts).getTime() : 0;
+  const age = Date.now() - ts;
+  const freshness = Math.exp(-age / FRESHNESS_HALF_LIFE_MS) * 100;
+  score += freshness * 0.2;
+
+  return score;
+}
+
+function selectRelevant(items, targetScope, message, limit) {
   if (!items.length) return [];
-  // Score by keyword overlap with user message
   const words = message.toLowerCase().split(/\s+/).filter(w => w.length > 1);
-  const scored = items.map(item => {
-    const text = JSON.stringify(item.event || item).toLowerCase();
-    const hits = words.filter(w => text.includes(w)).length;
-    return { item, score: hits };
-  });
+  const scored = items.map(item => ({
+    item,
+    score: scoreItem(item, targetScope, words),
+  }));
   scored.sort((a, b) => b.score - a.score);
   return scored.slice(0, limit).filter(s => s.score > 0).map(s => s.item);
 }
+
+// --- Pipeline middleware ---
 
 pipeline.use('memory-loop', async ({ request, config, context }) => {
   if (!config.modules?.memoryLoop) return {};
@@ -52,14 +92,16 @@ pipeline.use('memory-loop', async ({ request, config, context }) => {
   const userMsg = request.messages?.findLast(m => m.role === 'user');
   const text = typeof userMsg?.content === 'string' ? userMsg.content : '';
 
+  const targetScope = context.scope || normalizeScope({});
+
   const facts = readJson(config.memory?.factsPath);
   const lessons = readJson(config.memory?.lessonsPath);
 
-  const relevantFacts = selectRelevant(facts, text, 5);
-  const relevantLessons = selectRelevant(lessons, text, 3);
+  const relevantFacts = selectRelevant(facts, targetScope, text, MAX_FACTS);
+  const relevantLessons = selectRelevant(lessons, targetScope, text, MAX_LESSONS);
 
   if (relevantFacts.length === 0 && relevantLessons.length === 0) {
-    return { meta: { facts: 0, lessons: 0 } };
+    return { meta: { facts: 0, lessons: 0, scope: targetScope } };
   }
 
   const parts = [];
@@ -68,28 +110,31 @@ pipeline.use('memory-loop', async ({ request, config, context }) => {
       const e = f.event || f;
       return `- ${e.message || e.content || JSON.stringify(e).slice(0, 100)}`;
     });
-    parts.push(`## Known Facts\n${factLines.join('\n')}`);
+    parts.push(`## Factual Memory Snapshot\n${factLines.join('\n')}`);
   }
   if (relevantLessons.length > 0) {
     const lessonLines = relevantLessons.map(l => {
       const e = l.event || l;
       return `- ${e.tool_name || ''}: ${e.message || e.content || JSON.stringify(e).slice(0, 100)}`;
     });
-    parts.push(`## Execution Lessons\n${lessonLines.join('\n')}`);
+    parts.push(`## Execution Lessons Snapshot\n${lessonLines.join('\n')}`);
   }
 
   sysMsg.content += '\n\n' + parts.join('\n\n');
-
-  // Store user message as fact for future reference
   context._memoryUserMsg = text;
 
   return {
     request,
-    meta: { facts: relevantFacts.length, lessons: relevantLessons.length },
+    meta: {
+      facts: relevantFacts.length,
+      lessons: relevantLessons.length,
+      scope: targetScope,
+    },
   };
 });
 
-// Record user interaction after response
+// --- Record user interaction after response (with canonical scope) ---
+
 pipeline.onResponse('memory-loop', async ({ response, context, config }) => {
   if (!config.modules?.memoryLoop) return;
   if (!context._memoryUserMsg) return;
@@ -97,17 +142,23 @@ pipeline.onResponse('memory-loop', async ({ response, context, config }) => {
   const factsPath = config.memory?.factsPath;
   if (!factsPath) return;
 
+  const scope = context.scope || normalizeScope({});
   const facts = readJson(factsPath);
   const maxFacts = config.memory?.maxFacts || 200;
 
   facts.push({
     ts: new Date().toISOString(),
     bucket: 'fact',
-    event: { type: 'user_message', channel: context.channel, message: context._memoryUserMsg },
+    scope: { ...scope },
+    event: {
+      type: 'user_message',
+      channel: scope.channel,
+      agentId: scope.agentId,
+      routeTag: scope.routeTag,
+      message: context._memoryUserMsg,
+    },
   });
 
-  // Prune old entries
   while (facts.length > maxFacts) facts.shift();
-
   writeJson(factsPath, facts);
 });
