@@ -1,0 +1,19 @@
+{
+  "name": "mindclaw",
+  "version": "0.1.0",
+  "description": "Pluggable AI middleware proxy for OpenClaw — intercepts, enriches, and routes LLM traffic",
+  "type": "module",
+  "bin": {
+    "mindclaw": "./bin/mindclaw.mjs"
+  },
+  "main": "./src/index.mjs",
+  "scripts": {
+    "start": "node bin/mindclaw.mjs",
+    "dev": "node --watch bin/mindclaw.mjs"
+  },
+  "keywords": ["openclaw", "llm", "proxy", "middleware", "ai-agent"],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  }
+}
