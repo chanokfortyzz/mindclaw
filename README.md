@@ -4,6 +4,38 @@
 
 [English](#english) | 中文
 
+## 为什么做这个
+
+OpenClaw 是个好网关，但它管的是「把消息送到 LLM」这件事。至于怎么让 LLM 变得更聪明 —— 记住用户说过什么、知道什么时候该小心、根据渠道调整说话方式 —— 这些它不管。
+
+直接改 OpenClaw 源码？每次上游更新你就得祈祷不冲突。fork 一份？维护成本比写新功能还高。
+
+所以 Mindclaw 选了最简单的路：做一个代理，架在网关前面。请求进来，过一遍中间件管道，增强完了再转发。网关完全不知道发生了什么，也不需要知道。
+
+崩了？重启两秒。不想用了？nginx 指回网关，完事。
+
+## 站在巨人肩膀上
+
+这不是凭空造出来的。Mindclaw 的核心设计从几个项目里偷师：
+
+- [Hermes Agent](https://github.com/NousResearch/Hermes-Function-Calling)（NousResearch）—— 上下文压缩的三层策略、错误分类恢复、事实记忆和执行记忆分离。Mindclaw 的 facts/lessons 双文件记忆就是照着它的思路来的。
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) / [Codex](https://github.com/openai/codex) —— 任务复杂度判断。简单的事情别浪费算力，复杂的事情别用小模型硬扛。task-analyzer 就干这个。
+- [OpenClaw](https://github.com/nicepkg/openclaw) 本身 —— 插件系统设计得不错，harness 直接用它的生命周期钩子做渠道检测。
+
+## 装上 Mindclaw 你多了什么
+
+| 能力 | 没有 Mindclaw | 有 Mindclaw |
+|---|---|---|
+| 记忆 | 每次对话从零开始 | 自动积累事实和经验教训，下次对话带上相关记忆 |
+| 风险意识 | LLM 说删就删 | `rm -rf`、`drop table` 这种操作会被拦下来加警告 |
+| 技能发现 | 手动告诉 LLM 能干什么 | 自动匹配触发词，把技能提示塞进 prompt |
+| 任务路由 | 所有请求一视同仁 | 自动判断复杂度，为模型选择提供依据 |
+| 上下文控制 | 聊多了就爆 token | 主动裁剪历史，保住关键上下文 |
+| 渠道适配 | 微信和 Discord 说一样的话 | 按渠道定制提示词，该简短简短，该详细详细 |
+| 供应商兼容 | 换个 API 就报错 | 自动处理 thinking/developer 角色等兼容性问题 |
+| 可观测性 | 出了问题靠猜 | 全链路 JSONL 追踪，每个中间件干了什么一目了然 |
+| 依赖 | — | 零外部依赖。不需要 Redis、Postgres、向量数据库 |
+
 ## 快速开始
 
 ```bash
