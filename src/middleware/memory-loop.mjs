@@ -38,9 +38,31 @@ function writeJson(filePath, data) {
 
 // --- Ranking engine ---
 
-const MAX_FACTS = 6;
-const MAX_LESSONS = 4;
+const DEFAULT_MAX_FACTS = 6;
+const DEFAULT_MAX_LESSONS = 4;
 const FRESHNESS_HALF_LIFE_MS = 3 * 24 * 60 * 60 * 1000; // 3 days
+
+function budgetTopK(base, budgetLevel) {
+  if (budgetLevel === 'emergency') return Math.max(1, Math.floor(base / 3));
+  if (budgetLevel === 'critical') return Math.max(2, Math.floor(base / 2));
+  if (budgetLevel === 'warning') return Math.max(2, base - 2);
+  return base;
+}
+
+/**
+ * Extract keywords from text, handling both space-separated and CJK text.
+ */
+function extractKeywords(text) {
+  const str = String(text || '').toLowerCase();
+  const spaceWords = str.split(/\s+/).filter(w => w.length > 1).slice(0, 8);
+  // CJK bigrams for Chinese/Japanese/Korean text
+  const cjk = str.replace(/[^\u4e00-\u9fff]/g, '');
+  const bigrams = [];
+  for (let i = 0; i < cjk.length - 1; i++) {
+    bigrams.push(cjk.slice(i, i + 2));
+  }
+  return [...new Set([...spaceWords, ...bigrams.slice(0, 8)])];
+}
 
 /**
  * Score a single memory item against current scope + user message.
@@ -72,10 +94,10 @@ function scoreItem(item, targetScope, messageWords) {
 
 function selectRelevant(items, targetScope, message, limit) {
   if (!items.length) return [];
-  const words = message.toLowerCase().split(/\s+/).filter(w => w.length > 1);
+  const keywords = extractKeywords(message);
   const scored = items.map(item => ({
     item,
-    score: scoreItem(item, targetScope, words),
+    score: scoreItem(item, targetScope, keywords),
   }));
   scored.sort((a, b) => b.score - a.score);
   return scored.slice(0, limit).filter(s => s.score > 0).map(s => s.item);
@@ -87,18 +109,29 @@ pipeline.use('memory-loop', async ({ request, config, context }) => {
   if (!config.modules?.memoryLoop) return {};
 
   const sysMsg = request.messages?.[0];
-  if (!sysMsg || (sysMsg.role !== 'system' && sysMsg.role !== 'developer')) return {};
+  if (!sysMsg || (sysMsg.role !== 'system' && sysMsg.role !== 'developer')) {
+    // Auto-create system message so memory injection always fires
+    if (request.messages && request.messages.length > 0) {
+      request.messages.unshift({ role: 'system', content: '' });
+    } else {
+      return {};
+    }
+  }
 
+  const target = request.messages[0];
   const userMsg = request.messages?.findLast(m => m.role === 'user');
   const text = typeof userMsg?.content === 'string' ? userMsg.content : '';
 
   const targetScope = context.scope || normalizeScope({});
+  const budgetLevel = context.budgetLevel || config.budget?.level || 'normal';
 
   const facts = readJson(config.memory?.factsPath);
   const lessons = readJson(config.memory?.lessonsPath);
 
-  const relevantFacts = selectRelevant(facts, targetScope, text, MAX_FACTS);
-  const relevantLessons = selectRelevant(lessons, targetScope, text, MAX_LESSONS);
+  const maxFacts = budgetTopK(DEFAULT_MAX_FACTS, budgetLevel);
+  const maxLessons = budgetTopK(DEFAULT_MAX_LESSONS, budgetLevel);
+  const relevantFacts = selectRelevant(facts, targetScope, text, maxFacts);
+  const relevantLessons = selectRelevant(lessons, targetScope, text, maxLessons);
 
   if (relevantFacts.length === 0 && relevantLessons.length === 0) {
     return { meta: { facts: 0, lessons: 0, scope: targetScope } };
@@ -108,19 +141,23 @@ pipeline.use('memory-loop', async ({ request, config, context }) => {
   if (relevantFacts.length > 0) {
     const factLines = relevantFacts.map(f => {
       const e = f.event || f;
-      return `- ${e.message || e.content || JSON.stringify(e).slice(0, 100)}`;
+      const ts = f.ts ? new Date(f.ts).toISOString().slice(0, 10) : '';
+      const summary = e.summary || e.message || e.content || JSON.stringify(e).slice(0, 200);
+      return `- [${ts}] ${String(summary).slice(0, 250)}`;
     });
     parts.push(`## Factual Memory Snapshot\n${factLines.join('\n')}`);
   }
   if (relevantLessons.length > 0) {
     const lessonLines = relevantLessons.map(l => {
       const e = l.event || l;
-      return `- ${e.tool_name || ''}: ${e.message || e.content || JSON.stringify(e).slice(0, 100)}`;
+      const ts = l.ts ? new Date(l.ts).toISOString().slice(0, 10) : '';
+      const summary = e.lesson || e.summary || e.message || e.content || JSON.stringify(e).slice(0, 200);
+      return `- [${ts}] ${String(summary).slice(0, 250)}`;
     });
     parts.push(`## Execution Lessons Snapshot\n${lessonLines.join('\n')}`);
   }
 
-  sysMsg.content += '\n\n' + parts.join('\n\n');
+  target.content += '\n\n' + parts.join('\n\n');
   context._memoryUserMsg = text;
 
   return {

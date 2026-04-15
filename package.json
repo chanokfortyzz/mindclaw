@@ -1,6 +1,6 @@
 {
   "name": "mindclaw",
-  "version": "0.1.0",
+  "version": "0.2.1",
   "description": "Pluggable AI middleware proxy for OpenClaw — intercepts, enriches, and routes LLM traffic",
   "type": "module",
   "bin": {
