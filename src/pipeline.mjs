@@ -56,11 +56,14 @@ async function process({ method, url, headers, body, config }) {
 }
 
 function detectChannel(body, headers) {
-  // Check global hint (set by openclaw-harness plugin)
-  if (typeof globalThis.__openclaw_channel_hint === 'string' && globalThis.__openclaw_channel_hint) {
-    const hint = globalThis.__openclaw_channel_hint;
-    globalThis.__openclaw_channel_hint = '';
-    return hint;
+  // Check global hint (set by mindclaw harness plugin inside Gateway)
+  for (const key of ['__mindclaw_channel_hint', '__openclaw_channel_hint']) {
+    const hint = globalThis[key];
+    const ts = globalThis[key + '_ts'] || 0;
+    if (typeof hint === 'string' && hint && (Date.now() - ts) < 30000) {
+      globalThis[key] = '';
+      return hint.trim().toLowerCase();
+    }
   }
 
   // Check metadata

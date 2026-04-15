@@ -1,0 +1,8 @@
+{
+  "name": "mindclaw-harness",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Mindclaw gateway-side plugin for OpenClaw",
+  "main": "./index.ts",
+  "openclaw": {}
+}

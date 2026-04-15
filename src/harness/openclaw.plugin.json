@@ -1,0 +1,12 @@
+{
+  "id": "mindclaw",
+  "name": "Mindclaw",
+  "description": "Mindclaw harness — channel detection and LLM lifecycle hooks for OpenClaw Gateway",
+  "version": "1.0.0",
+  "channels": [],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}

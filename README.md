@@ -14,6 +14,8 @@ mindclaw --port 7000 --upstream http://localhost:7005
 
 ## Architecture
 
+Mindclaw has two components that work together:
+
 ```
 External Traffic (WeChat/Discord/etc.)
         │
@@ -28,10 +30,16 @@ External Traffic (WeChat/Discord/etc.)
    └────┬────────┘
         ▼
    ┌─────────────┐
-   │  OpenClaw    │ :7005  ← unmodified gateway
-   │  Gateway     │
+   │  OpenClaw    │ :7005  ← gateway with Mindclaw Harness plugin
+   │  Gateway     │           (provides channel detection via plugin API)
+   │  + Harness   │
    └─────────────┘
 ```
+
+- **Proxy** (`src/proxy.mjs`) — HTTP middleware, intercepts and enriches LLM requests
+- **Harness** (`src/harness/`) — OpenClaw Gateway plugin, hooks into lifecycle events for accurate channel detection
+
+The harness shares channel info with the proxy via `globalThis.__mindclaw_channel_hint`. This gives the proxy reliable channel detection without parsing request bodies.
 
 ## Middleware Pipeline
 
